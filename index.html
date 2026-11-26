@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Infinite Highway — 200 km/h Manual/Auto &amp; Audio</title>
+  <title>Infinite Highway — Panning Cam, Tight Hitboxes &amp; Wet Traffic</title>
   <style>
     * {
       box-sizing: border-box;
@@ -32,7 +32,8 @@
       z-index: 20;
       transition: opacity 0.25s;
     }
-    #hud.hidden {
+    #hud.hidden,
+    #stats.hidden {
       opacity: 0;
       pointer-events: none;
     }
@@ -109,6 +110,7 @@
       font-variant-numeric: tabular-nums;
       text-align: right;
       z-index: 20;
+      transition: opacity 0.2s;
     }
     #speed {
       font-size: 20px;
@@ -266,14 +268,15 @@
       <button id="cruiseBtn">Auto-Drive (P)</button>
       <button id="soundBtn">Sound: On (V)</button>
       <button id="hitboxBtn">Hitboxes: Off (B)</button>
+      <button id="statsBtn">Stats: On (X)</button>
       <button id="rotBtn">Rotate Car 90°</button>
       <button id="shadowBtn">Shadows: 2048px</button>
-      <button id="hideBtn">Hide HUD (H)</button>
+      <button id="hideBtn" style="grid-column: span 2;">Hide HUD (H)</button>
     </div>
     <div class="keys">
       <b>Drive:</b> WASD / Arrows &bull; <b>Drift:</b> Space &bull; <b>Reset:</b> R<br />
-      <b>Manual Gears:</b> E (Up) / Q (Down) &bull; <b>G:</b> Auto/Manual<br />
-      <b>T:</b> Time &bull; <b>Y:</b> Weather &bull; <b>V:</b> Mute &bull; <b>H:</b> Hide
+      <b>Gears:</b> E (Up) / Q (Down) &bull; <b>G:</b> Auto/Man &bull; <b>X:</b> Stats<br />
+      <b>Mouse:</b> Click road to look 360° &bull; <b>Right-Click:</b> Center
     </div>
   </div>
 
@@ -297,6 +300,14 @@
     import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
     import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
     import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+    // Only blur <select> AFTER choosing an option (never on click, so menus stay open!)
+    document.querySelectorAll('select').forEach((el) => {
+      el.addEventListener('change', () => el.blur());
+    });
+    document.querySelectorAll('button').forEach((el) => {
+      el.addEventListener('click', () => el.blur());
+    });
 
     // =========================================================================
     // AUDIO MANAGER (Car.mp3, Rain.mp3, Thunder.mp3)
@@ -525,7 +536,7 @@
 
       ctx.fillStyle = '#36393f';
       ctx.fillRect(0, 0, 1024, 512);
-      rCtx.fillStyle = 'rgb(130, 130, 130)';
+      rCtx.fillStyle = 'rgb(138, 138, 138)';
       rCtx.fillRect(0, 0, 1024, 512);
 
       const img = ctx.getImageData(0, 0, 1024, 512);
@@ -543,9 +554,9 @@
         const rx = 45 + Math.random() * 90;
         const ry = 55 + Math.random() * 110;
         const g = rCtx.createRadialGradient(px, py, 6, px, py, Math.max(rx, ry));
-        g.addColorStop(0, 'rgb(30, 30, 30)');
-        g.addColorStop(0.68, 'rgb(44, 44, 44)');
-        g.addColorStop(1, 'rgba(130, 130, 130, 0)');
+        g.addColorStop(0, 'rgb(36, 36, 36)');
+        g.addColorStop(0.68, 'rgb(52, 52, 52)');
+        g.addColorStop(1, 'rgba(138, 138, 138, 0)');
         rCtx.fillStyle = g;
         rCtx.beginPath();
         rCtx.ellipse(px, py, rx, ry, 0, 0, Math.PI * 2);
@@ -838,7 +849,8 @@
 
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.28, 0.42, 0.88);
+    // Higher bloom threshold (0.98) so only emissive lights & lightning glow, never wet asphalt!
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.20, 0.38, 0.98);
     composer.addPass(bloomPass);
     composer.addPass(new OutputPass());
 
@@ -856,7 +868,8 @@
       uWetness: { value: 0.0 },
       uPlanarMap: { value: planarRT.texture },
       uPlanarActive: { value: 1.0 },
-      uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) }
+      uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+      uSkyFallback: { value: new THREE.Color(0x4b535e) }
     };
     const windUniforms = { uTime: { value: 0 } };
 
@@ -943,7 +956,7 @@
           vec3 d = normalize(vWorldDir);
           vec3 col = mix(uSkyHorizon, uSkyZenith, pow(clamp(d.y, 0.0, 1.0), 0.55));
           float lDot = max(dot(d, normalize(uLightDir)), 0.0);
-          col += uDiscColor * pow(lDot, 20.0) * 0.22 + uDiscColor * smoothstep(0.9985, 0.9996, lDot) * 1.5;
+          col += uDiscColor * pow(lDot, 20.0) * 0.22 + uDiscColor * smoothstep(0.9985, 0.9996, lDot) * 1.1;
 
           float stars = 0.0;
           if (uStarStrength > 0.05 && d.y > 0.03) {
@@ -969,7 +982,7 @@
               if (dens > 0.01) {
                 float nL = fbmCloud((p + uLightDir * 24.0).xz * 0.0024 + wind) - uCloudCoverage;
                 float shadow = exp(-max(nL, 0.0) * 2.8);
-                vec3 sc = mix(uCloudDark, uCloudBright + vec3(0.75, 0.86, 1.0) * uLightning * 1.4, shadow);
+                vec3 sc = mix(uCloudDark, uCloudBright + vec3(0.75, 0.86, 1.0) * uLightning * 1.1, shadow);
                 float alpha = clamp(dens * (4.8 / float(uCloudSteps)), 0.0, 0.92);
                 cloudLight += transmittance * sc * alpha;
                 transmittance *= (1.0 - alpha);
@@ -981,7 +994,7 @@
           } else {
             col += uDiscColor * stars * uStarStrength;
           }
-          col += vec3(0.28, 0.36, 0.52) * uLightning * 0.45;
+          col += vec3(0.28, 0.36, 0.52) * uLightning * 0.40;
           gl_FragColor = vec4(col, 1.0);
         }
       `
@@ -1089,7 +1102,7 @@
     const cubeCamera = new THREE.CubeCamera(0.4, 320, cubeRenderTarget);
     scene.add(cubeCamera);
 
-    // --- Shared Materials & Shaders ---
+    // --- Shared Materials & Glitch-Free Planar Wet Road Shader ---
     function applyWindSway(mat, amp = 0.12) {
       mat.customProgramCacheKey = () => 'foliage-wind-' + amp;
       mat.onBeforeCompile = (shader) => {
@@ -1110,7 +1123,7 @@
     }
 
     function applyPlanarPuddleShader(mat) {
-      mat.customProgramCacheKey = () => 'planar-wet-puddle-ripples-v2';
+      mat.customProgramCacheKey = () => 'planar-wet-puddle-ripples-v3';
       mat.onBeforeCompile = (shader) => {
         shader.uniforms.uTime = rippleUniforms.uTime;
         shader.uniforms.uRippleStrength = rippleUniforms.uRippleStrength;
@@ -1118,6 +1131,7 @@
         shader.uniforms.uPlanarMap = rippleUniforms.uPlanarMap;
         shader.uniforms.uPlanarActive = rippleUniforms.uPlanarActive;
         shader.uniforms.uResolution = rippleUniforms.uResolution;
+        shader.uniforms.uSkyFallback = rippleUniforms.uSkyFallback;
 
         shader.vertexShader = shader.vertexShader
           .replace('#include <common>', `#include <common>\nvarying vec3 vWorldPosRoad, vViewX, vViewZ;`)
@@ -1134,7 +1148,9 @@
             uniform float uTime, uRippleStrength, uWetness, uPlanarActive;
             uniform sampler2D uPlanarMap;
             uniform vec2 uResolution;
+            uniform vec3 uSkyFallback;
             varying vec3 vWorldPosRoad, vViewX, vViewZ;
+
             vec2 rainHash22(vec2 p) {
               vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
               p3 += dot(p3, p3.yzx + 33.33);
@@ -1154,27 +1170,35 @@
           `)
           .replace('#include <roughnessmap_fragment>', `
             #include <roughnessmap_fragment>
-            roughnessFactor = max(mix(0.88, roughnessFactor, uWetness), 0.16);
+            // Keep rawRough for puddle mask, clamp PBR light roughness >= 0.32 to prevent white specular flashing!
+            float rawRough = mix(0.88, roughnessFactor, uWetness);
+            roughnessFactor = max(rawRough, 0.32);
           `)
           .replace('#include <normal_fragment_maps>', `
             #include <normal_fragment_maps>
             vec2 rGradTotal = vec2(0.0);
-            float puddleMask = smoothstep(0.44, 0.16, roughnessFactor) * uWetness;
+            float puddleMask = smoothstep(0.46, 0.18, rawRough) * uWetness;
             if (uRippleStrength > 0.01 && puddleMask > 0.01) {
               vec2 ruv = vWorldPosRoad.xz * 0.90;
               rGradTotal = rainRippleLayer(ruv, 0.0, 0.72)
                          + rainRippleLayer(ruv * 1.45 + vec2(3.7, 8.2), 0.37, 0.85)
                          + rainRippleLayer(ruv * 2.15 + vec2(11.3, 4.9), 0.68, 0.95);
-              normal = normalize(normal + (vViewX * rGradTotal.x + vViewZ * rGradTotal.y) * puddleMask * uRippleStrength * 0.42);
+              // Gentle normal perturbation so grazing normals never invert or flash white
+              normal = normalize(normal + (vViewX * rGradTotal.x + vViewZ * rGradTotal.y) * puddleMask * uRippleStrength * 0.14);
             }
           `)
           .replace('#include <tonemapping_fragment>', `
             if (uPlanarActive > 0.5 && puddleMask > 0.01) {
+              float camDist = length(vViewPosition);
+              float distFade = 1.0 - smoothstep(22.0, 75.0, camDist);
               vec2 screenUV = gl_FragCoord.xy / max(uResolution, vec2(1.0));
-              vec2 reflUV = clamp(vec2(screenUV.x, 1.0 - screenUV.y) + rGradTotal * puddleMask * uRippleStrength * 0.016, 0.002, 0.998);
-              vec3 planarCol = min(texture2D(uPlanarMap, reflUV).rgb, vec3(1.5));
+              vec2 reflUV = clamp(vec2(screenUV.x, 1.0 - screenUV.y) + rGradTotal * puddleMask * uRippleStrength * 0.012, 0.004, 0.996);
+              vec3 planarCol = clamp(texture2D(uPlanarMap, reflUV).rgb, vec3(0.0), vec3(1.10));
+              // Smoothly blend distant planar reflections into steady sky horizon color (eliminates hill-clip flicker!)
+              vec3 finalRefl = mix(uSkyFallback, planarCol, distFade);
               float NdotV = clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0);
-              gl_FragColor.rgb = mix(gl_FragColor.rgb, planarCol, puddleMask * mix(0.24, 0.86, pow(1.0 - NdotV, 2.8)) * 0.82);
+              float fresnel = mix(0.20, 0.78, pow(1.0 - NdotV, 2.5));
+              gl_FragColor.rgb = mix(gl_FragColor.rgb, finalRefl, puddleMask * fresnel * 0.82);
             }
             #include <tonemapping_fragment>
           `);
@@ -1188,13 +1212,12 @@
       bumpScale: 0.35,
       roughness: 0.92
     });
+    // No cubemap envMap on highwayMat when planar reflections handle puddles cleanly (prevents double-reflection white glare!)
     const highwayMat = new THREE.MeshStandardMaterial({
       map: highwayTex.mapTex,
       roughnessMap: highwayTex.roughTex,
       roughness: 0.88,
-      metalness: 0.06,
-      envMap: cubeRenderTarget.texture,
-      envMapIntensity: 0.25
+      metalness: 0.06
     });
     applyPlanarPuddleShader(highwayMat);
 
@@ -1646,7 +1669,7 @@
         dummy.updateMatrix();
         bTrunks.setMatrixAt(i, dummy.matrix);
         bLeaves.setMatrixAt(i, dummy.matrix);
-        trees.push({ x: wx, z: wz, r: 0.36 * s });
+        trees.push({ x: wx, z: wz, r: 0.34 * s });
         if (hash2(i + cSeed, 8) < 0.22) tint.setRGB(0.82, 0.82, 0.80);
         else tint.setRGB(0.36 + hash2(i, 9) * 0.16, 0.28 + hash2(i, 9) * 0.12, 0.20 + hash2(i, 9) * 0.08);
         bTrunks.setColorAt(i, tint);
@@ -1671,7 +1694,7 @@
         dummy.updateMatrix();
         pTrunks.setMatrixAt(i, dummy.matrix);
         pNeedles.setMatrixAt(i, dummy.matrix);
-        trees.push({ x: wx, z: wz, r: 0.34 * s });
+        trees.push({ x: wx, z: wz, r: 0.32 * s });
         tint.setRGB(0.38, 0.30, 0.22);
         pTrunks.setColorAt(i, tint);
         tint.setRGB(0.75 + hash2(i, 8) * 0.3, 0.82 + hash2(i, 9) * 0.25, 0.72 + hash2(i, 10) * 0.2);
@@ -1806,20 +1829,25 @@
           z: zOff,
           x: roadCenterX(zOff) + lane.side,
           y: roadElevation(zOff) + 0.05,
-          yaw: 0
+          zWorld: zOff,
+          yaw: 0,
+          wakeAccum: 0
         });
       }
     }
     initTraffic();
 
     // =========================================================================
-    // PLAYER CAR HIERARCHY & GLB LOADER
+    // PLAYER CAR HIERARCHY & TIGHTER HITBOXES
     // =========================================================================
+    const CAR_HIT_RADIUS = 0.72; // Tighter car hitbox radius
+    const CAR_HIT_Z = 1.35;
+
     const carGroup = new THREE.Group();
     scene.add(carGroup);
 
     const contactShadow = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.5, 5.2),
+      new THREE.PlaneGeometry(2.4, 4.9),
       new THREE.MeshBasicMaterial({
         map: shadowTex,
         transparent: true,
@@ -1836,9 +1864,9 @@
     hitboxDebugGroup.visible = false;
     carGroup.add(hitboxDebugGroup);
     const hbWireMat = new THREE.MeshBasicMaterial({ color: 0x00ff88, wireframe: true });
-    for (const zOff of [1.42, -1.42]) {
-      const sph = new THREE.Mesh(new THREE.SphereGeometry(1.0, 12, 8), hbWireMat);
-      sph.position.set(0, 0.85, zOff);
+    for (const zOff of [CAR_HIT_Z, -CAR_HIT_Z]) {
+      const sph = new THREE.Mesh(new THREE.SphereGeometry(CAR_HIT_RADIUS, 12, 8), hbWireMat);
+      sph.position.set(0, 0.75, zOff);
       hitboxDebugGroup.add(sph);
     }
 
@@ -2022,9 +2050,9 @@
     document.getElementById('flipBtn').addEventListener('click', () => { userYawOffset += Math.PI; modelHolder.rotation.y = userYawOffset; });
 
     // =========================================================================
-    // WET TIRE WATER WAKE + DROPLET SPLASHES + SUBTLE MIST + RAIN
+    // SHARED WET TIRE WATER WAKE + DROPLETS (PLAYER + AI TRAFFIC!) + MIST + RAIN
     // =========================================================================
-    const WAKE_COUNT = 80;
+    const WAKE_COUNT = 240; // Shared between player and AI traffic cars!
     const wakeGeo = new THREE.PlaneGeometry(0.46, 1.55);
     wakeGeo.rotateX(-Math.PI / 2);
     const wakeAlphas = new Float32Array(WAKE_COUNT);
@@ -2070,10 +2098,30 @@
     let wakeCursor = 0;
     let wakeTimer = 0;
 
-    const DROP_COUNT = 140;
+    function emitTireWakePair(wx, wz, yaw) {
+      const lx = Math.cos(yaw) * 0.86;
+      const lz = -Math.sin(yaw) * 0.86;
+      const bx = -Math.sin(yaw) * 1.35;
+      const bz = -Math.cos(yaw) * 1.35;
+      for (const s of [1, -1]) {
+        const px = wx + bx + lx * s;
+        const pz = wz + bz + lz * s;
+        const idx = wakeCursor;
+        wakeCursor = (wakeCursor + 1) % WAKE_COUNT;
+        wakeAlphas[idx] = 1.0;
+        wakeDummy.position.set(px, getDriveSurfaceHeight(px, pz) + 0.015, pz);
+        wakeDummy.rotation.set(0, yaw, 0);
+        wakeDummy.scale.set(1, 1, 1);
+        wakeDummy.updateMatrix();
+        wakeMesh.setMatrixAt(idx, wakeDummy.matrix);
+      }
+      wakeMesh.instanceMatrix.needsUpdate = true;
+    }
+
+    const DROP_COUNT = 300; // Shared droplet pool across player & nearby AI traffic!
     const dropPos = new Float32Array(DROP_COUNT * 6);
     const drops = [];
-    for (let i = 0; i < DROP_COUNT; i++) drops.push({ x: 0, y: -10, z: 0, vx: 0, vy: 0, vz: 0, life: 1.0 });
+    for (let i = 0; i < DROP_COUNT; i++) drops.push({ x: 0, y: -200, z: 0, vx: 0, vy: 0, vz: 0, life: 1.0 });
     const dropGeo = new THREE.BufferGeometry();
     dropGeo.setAttribute('position', new THREE.BufferAttribute(dropPos, 3));
     const dropMat = new THREE.LineBasicMaterial({ color: 0xd0deeb, transparent: true, opacity: 0.42 });
@@ -2138,19 +2186,19 @@
         cb = new THREE.Color(0xffa66b); cd = new THREE.Color(0x362c4a);
         fogC = new THREE.Color(0x5b444c); hSky = new THREE.Color(0xff9b71); hGnd = new THREE.Color(0x1e241b);
         sCol = new THREE.Color(0xffa463); sInt = 1.55; starStr = 0.25; discC = new THREE.Color(0xffb56b);
-        headInt = 36; lampInt = 22; lDir = new THREE.Vector3(0.55, 0.18, 0.81).normalize();
+        headInt = 32; lampInt = 22; lDir = new THREE.Vector3(0.55, 0.18, 0.81).normalize();
       } else if (currentTime === 'night') {
         zen = new THREE.Color(0x040814); hor = new THREE.Color(0x0e192b);
         cb = new THREE.Color(0x3f5270); cd = new THREE.Color(0x090f1c);
         fogC = new THREE.Color(0x0a111d); hSky = new THREE.Color(0x284066); hGnd = new THREE.Color(0x0a0f0b);
         sCol = new THREE.Color(0x98b9eb); sInt = 0.78; starStr = 1.0; discC = new THREE.Color(0xdbe9ff);
-        headInt = 65; lampInt = 30; lDir = new THREE.Vector3(-0.35, 0.44, 0.82).normalize();
+        headInt = 55; lampInt = 30; lDir = new THREE.Vector3(-0.35, 0.44, 0.82).normalize();
       } else {
         zen = new THREE.Color(0x282e38); hor = new THREE.Color(0x5b636e);
         cb = new THREE.Color(0x8c96a3); cd = new THREE.Color(0x2c323b);
         fogC = new THREE.Color(0x4b535e); hSky = new THREE.Color(0x9aa6b5); hGnd = new THREE.Color(0x262b26);
         sCol = new THREE.Color(0xd7e0eb); sInt = 1.25; starStr = 0.0; discC = new THREE.Color(0xdbe4ed);
-        headInt = 16; lampInt = 10; lDir = new THREE.Vector3(0.45, 0.55, 0.70).normalize();
+        headInt = 14; lampInt = 10; lDir = new THREE.Vector3(0.45, 0.55, 0.70).normalize();
       }
 
       let cloudCov = 0.52, wetness = 0.0, rippleStr = 0.0, fogDens = 0.0036;
@@ -2172,7 +2220,7 @@
         zen.lerp(dSky, 0.88); hor.lerp(dSky, 0.88);
         cb.lerp(new THREE.Color(0x5a6472), 0.8); cd.lerp(new THREE.Color(0x191e26), 0.85);
         fogC.lerp(dSky, 0.90); sInt *= 0.45; starStr = 0.0;
-        if (currentTime === 'day') { headInt = 32; lampInt = 18; }
+        if (currentTime === 'day') { headInt = 28; lampInt = 18; }
         cloudCov = 0.28; wetness = 1.0; rippleStr = 1.35; fogDens = 0.0105;
         rainLines.visible = true; rainActive = true; rainMat.opacity = 0.38; sprayScale = 1.35;
       }
@@ -2185,6 +2233,7 @@
       skyUniforms.uStarStrength.value = starStr;
       skyUniforms.uDiscColor.value.copy(discC);
       skyUniforms.uLightDir.value.copy(lDir);
+      rippleUniforms.uSkyFallback.value.copy(hor).multiplyScalar(0.75);
 
       scene.fog.color.copy(fogC);
       scene.fog.density = fogDens;
@@ -2202,37 +2251,40 @@
       wakeMesh.visible = wetness > 0.2;
       dropLines.visible = wetness > 0.2;
 
-      highwayMat.metalness = THREE.MathUtils.lerp(0.06, 0.50, wetness);
-      highwayMat.envMapIntensity = THREE.MathUtils.lerp(0.25, 1.15, wetness);
-
+      highwayMat.metalness = THREE.MathUtils.lerp(0.06, 0.16, wetness);
       updateWeatherAudio();
     }
 
     // =========================================================================
     // 6-SPEED AUTOMATIC & MANUAL GEARBOX + 200 KM/H TOP SPEED
     // =========================================================================
-    // Max speed 200 km/h = 55.56 m/s
     const GEAR_TABLE = [
-      { label: 'R', maxSpd: 15.3, torque: 19.0 },  // Reverse (~55 km/h)
-      { label: '1', maxSpd: 12.8, torque: 28.0 },  // 0 - 46 km/h
-      { label: '2', maxSpd: 22.8, torque: 23.5 },  // up to 82 km/h
-      { label: '3', maxSpd: 32.8, torque: 19.5 },  // up to 118 km/h
-      { label: '4', maxSpd: 42.2, torque: 16.5 },  // up to 152 km/h
-      { label: '5', maxSpd: 50.0, torque: 14.2 },  // up to 180 km/h
-      { label: '6', maxSpd: 55.56, torque: 12.6 }  // up to 200 km/h!
+      { label: 'R', maxSpd: 15.3, torque: 20.0 },
+      { label: '1', maxSpd: 13.9, torque: 24.5 },
+      { label: '2', maxSpd: 24.4, torque: 22.5 },
+      { label: '3', maxSpd: 34.4, torque: 20.5 },
+      { label: '4', maxSpd: 43.9, torque: 19.0 },
+      { label: '5', maxSpd: 51.1, torque: 17.5 },
+      { label: '6', maxSpd: 55.56, torque: 16.5 }
     ];
-    let transMode = 'auto'; // 'auto' or 'manual'
+    let transMode = 'auto';
 
     let camMode = 0;
     let autoCruise = true;
     let usePlanar = true;
     let useBloom = true;
-    let orbitYaw = 0.5;
-    let orbitPitch = 0.22;
-    let orbitDist = 5.8;
+    let statsVisible = true;
+    let freeLookYaw = 0.0;
+    let freeLookPitch = 0.0;
+    let orbitDist = 5.6;
     let isDragging = false;
     let lastMX = 0;
     let lastMY = 0;
+    let lastMouseMoveTime = 0;
+
+    // GTA V NVE Panning State
+    let panLateral = 0;
+    let camBank = 0;
 
     const carState = {
       zCruise: 0,
@@ -2242,6 +2294,13 @@
       roll: 0, rollVel: 0, pitch: 0, pitchVel: 0, suspY: 0, suspYVel: 0,
       prevGroundY: 0, impactTimer: 0, distanceMeters: 0
     };
+
+    function syncAutoGearForSpeed(vFwd) {
+      if (vFwd < -0.5) { carState.gear = 0; return; }
+      let g = 1;
+      while (g < 6 && vFwd > GEAR_TABLE[g].maxSpd * 0.88) g++;
+      carState.gear = g;
+    }
 
     function resetCarToHighway() {
       const z = 0;
@@ -2268,6 +2327,9 @@
     const keys = {};
     window.addEventListener('keydown', (e) => {
       if (document.activeElement === document.getElementById('seedInput')) return;
+      if (document.activeElement && (document.activeElement.tagName === 'SELECT' || document.activeElement.tagName === 'BUTTON')) {
+        document.activeElement.blur();
+      }
       keys[e.code] = true;
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
         if (autoCruise) { autoCruise = false; updateCamUI(); }
@@ -2282,15 +2344,19 @@
         transMode = transMode === 'auto' ? 'manual' : 'auto';
         document.getElementById('transSelect').value = transMode;
         document.getElementById('transBadge').textContent = transMode.toUpperCase();
+        if (transMode === 'auto') {
+          const vF = carState.vx * Math.sin(carState.yaw) + carState.vz * Math.cos(carState.yaw);
+          syncAutoGearForSpeed(vF);
+        }
+        updateCamUI();
       }
-      if (e.code === 'KeyV' && !e.repeat) {
-        toggleSound();
-      }
+      if (e.code === 'KeyV' && !e.repeat) toggleSound();
+      if (e.code === 'KeyX' && !e.repeat) toggleStats();
       if (e.code === 'KeyR') { resetCarToHighway(); rebuildAllChunks(); }
       if (e.code === 'KeyC') { camMode = (camMode + 1) % 3; updateCamUI(); }
       if (e.code === 'KeyM') { camMode = camMode === 2 ? 0 : 2; updateCamUI(); }
       if (e.code === 'KeyP') { autoCruise = !autoCruise; updateCamUI(); }
-      if (e.code === 'KeyB') { toggleHitboxes(); }
+      if (e.code === 'KeyB') toggleHitboxes();
       if (e.code === 'KeyH') document.getElementById('hud').classList.toggle('hidden');
       if (e.code === 'KeyT') {
         const opts = ['day', 'overcast', 'dusk', 'night'];
@@ -2326,6 +2392,57 @@
       updateWeatherAudio();
     }
 
+    function toggleStats() {
+      statsVisible = !statsVisible;
+      document.getElementById('stats').classList.toggle('hidden', !statsVisible);
+      document.getElementById('statsBtn').textContent = 'Stats: ' + (statsVisible ? 'On (X)' : 'Off (X)');
+    }
+
+    // --- Pointer Lock & Mouse Free-Look in ANY Camera Mode ---
+    renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    renderer.domElement.addEventListener('mousedown', (e) => {
+      if (e.button === 2) {
+        freeLookYaw = 0;
+        freeLookPitch = 0;
+        return;
+      }
+      if (e.button === 0) {
+        if (document.pointerLockElement !== renderer.domElement) {
+          isDragging = true;
+          lastMX = e.clientX;
+          lastMY = e.clientY;
+          try {
+            const p = renderer.domElement.requestPointerLock();
+            if (p && typeof p.catch === 'function') p.catch(() => {});
+          } catch {}
+        }
+      }
+    });
+
+    window.addEventListener('mouseup', () => { isDragging = false; });
+    document.addEventListener('pointerlockchange', () => { isDragging = false; });
+
+    window.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement === renderer.domElement) {
+        const dx = THREE.MathUtils.clamp(e.movementX || 0, -120, 120);
+        const dy = THREE.MathUtils.clamp(e.movementY || 0, -120, 120);
+        freeLookYaw -= dx * 0.0028;
+        freeLookPitch = THREE.MathUtils.clamp(freeLookPitch + dy * 0.0022, -0.18, 0.72);
+        lastMouseMoveTime = performance.now();
+      } else if (isDragging) {
+        freeLookYaw -= (e.clientX - lastMX) * 0.0055;
+        freeLookPitch = THREE.MathUtils.clamp(freeLookPitch + (e.clientY - lastMY) * 0.0045, -0.18, 0.72);
+        lastMX = e.clientX;
+        lastMY = e.clientY;
+        lastMouseMoveTime = performance.now();
+      }
+    });
+
+    window.addEventListener('wheel', (e) => {
+      orbitDist = THREE.MathUtils.clamp(orbitDist + e.deltaY * 0.005, 3.4, 12.0);
+    }, { passive: true });
+
     document.getElementById('applySeedBtn').addEventListener('click', () => {
       const s = document.getElementById('seedInput').value.trim() || 'HIGHWAY-2048';
       applySeedParams(s);
@@ -2340,22 +2457,13 @@
       rebuildAllChunks();
     });
 
-    renderer.domElement.addEventListener('pointerdown', (e) => { isDragging = true; lastMX = e.clientX; lastMY = e.clientY; });
-    window.addEventListener('pointerup', () => { isDragging = false; });
-    window.addEventListener('pointermove', (e) => {
-      if (!isDragging) return;
-      orbitYaw -= (e.clientX - lastMX) * 0.006;
-      orbitPitch = THREE.MathUtils.clamp(orbitPitch + (e.clientY - lastMY) * 0.005, 0.06, 0.85);
-      lastMX = e.clientX;
-      lastMY = e.clientY;
-    });
-    window.addEventListener('wheel', (e) => {
-      orbitDist = THREE.MathUtils.clamp(orbitDist + e.deltaY * 0.005, 3.6, 12.0);
-    }, { passive: true });
-
     document.getElementById('transSelect').addEventListener('change', (e) => {
       transMode = e.target.value;
       document.getElementById('transBadge').textContent = transMode.toUpperCase();
+      if (transMode === 'auto') {
+        const vF = carState.vx * Math.sin(carState.yaw) + carState.vz * Math.cos(carState.yaw);
+        syncAutoGearForSpeed(vF);
+      }
       updateCamUI();
     });
     document.getElementById('timeSelect').addEventListener('change', (e) => { currentTime = e.target.value; updateEnvironment(); });
@@ -2372,6 +2480,7 @@
     document.getElementById('bloomSelect').addEventListener('change', (e) => { useBloom = e.target.value === '1'; });
     document.getElementById('cruiseBtn').addEventListener('click', () => { autoCruise = !autoCruise; updateCamUI(); });
     document.getElementById('soundBtn').addEventListener('click', toggleSound);
+    document.getElementById('statsBtn').addEventListener('click', toggleStats);
     document.getElementById('hitboxBtn').addEventListener('click', toggleHitboxes);
     document.getElementById('hideBtn').addEventListener('click', () => document.getElementById('hud').classList.add('hidden'));
     document.getElementById('cloudSelect').addEventListener('change', (e) => { skyUniforms.uCloudSteps.value = parseInt(e.target.value, 10); });
@@ -2394,7 +2503,8 @@
     // --- Main Loop ---
     const targetQuat = new THREE.Quaternion();
     const basisMat = new THREE.Matrix4();
-    const camPos = new THREE.Vector3(carState.pos.x, carState.pos.y + 2.1, carState.pos.z - 5.4);
+    const camOffset = new THREE.Vector3(0, 2.1, -5.4);
+    const desiredOffset = new THREE.Vector3();
     const camLook = new THREE.Vector3();
     const pushVec = new THREE.Vector3();
     const surfaceTagEl = document.getElementById('surfaceTag');
@@ -2425,7 +2535,6 @@
         fpsFrames = 0;
       }
 
-      // Storm Lightning + Thunder.mp3
       if (currentWeather === 'storm') {
         lightningTimer -= dt;
         if (lightningTimer <= 0) {
@@ -2466,7 +2575,7 @@
       surfaceTagEl.style.color = offRoad ? '#ffd43b' : '#8ce99a';
 
       if (autoCruise) {
-        const cruiseSpd = 22.0; // ~79 km/h highway cruise
+        const cruiseSpd = 22.0;
         carState.zCruise += cruiseSpd * dt;
         const z = carState.zCruise;
         const cx = roadCenterX(z) + 4.1;
@@ -2495,18 +2604,17 @@
         let vFwd = carState.vx * fwdX + carState.vz * fwdZ;
         let vLat = carState.vx * rightX + carState.vz * rightZ;
 
-        carState.steer = THREE.MathUtils.lerp(carState.steer, steerIn * 0.48, 1 - Math.exp(-6.5 * dt));
+        carState.steer = THREE.MathUtils.lerp(carState.steer, steerIn * 0.54, 1 - Math.exp(-12.0 * dt));
 
-        // Automatic Gearbox Shifting Logic (6-Speed up to 200 km/h)
         if (transMode === 'auto') {
           if (vFwd < -0.5 || (fwdInput < 0 && vFwd <= 0.8)) {
-            carState.gear = 0; // Reverse
+            carState.gear = 0;
           } else {
             if (carState.gear === 0 && vFwd >= -0.2) carState.gear = 1;
             const curCap = GEAR_TABLE[carState.gear].maxSpd;
             const prevCap = carState.gear > 1 ? GEAR_TABLE[carState.gear - 1].maxSpd : 0;
-            if (carState.gear < 6 && vFwd > curCap * 0.92 && fwdInput > 0) carState.gear++;
-            else if (carState.gear > 1 && vFwd < prevCap * 0.80) carState.gear--;
+            if (carState.gear < 6 && vFwd >= curCap * 0.88 && fwdInput >= 0) carState.gear++;
+            else if (carState.gear > 1 && vFwd < prevCap * 0.72) carState.gear--;
           }
         }
 
@@ -2514,28 +2622,23 @@
         let longAccel = 0;
 
         if (carState.gear === 0) {
-          // Reverse gear
           if (fwdInput < 0) {
             longAccel = vFwd > -gInfo.maxSpd ? -gInfo.torque : 0;
           } else if (fwdInput > 0) {
-            if (vFwd < -0.8) { longAccel = 32.0; isBraking = true; }
-            else longAccel = 12.0;
+            if (vFwd < -0.8) { longAccel = 34.0; isBraking = true; }
+            else longAccel = 14.0;
           }
         } else {
-          // Forward gears 1..6 (reaching 200 km/h = 55.56 m/s in 6th!)
-          const prevSpd = carState.gear > 1 ? GEAR_TABLE[carState.gear - 1].maxSpd * 0.45 : 0;
           if (fwdInput > 0) {
             if (vFwd < -1.0) {
-              longAccel = 32.0;
+              longAccel = 34.0;
               isBraking = true;
             } else if (vFwd < gInfo.maxSpd) {
-              // Lugging penalty if in too high a gear at low speed in Manual mode
-              const lugFactor = (transMode === 'manual' && vFwd < prevSpd * 0.7) ? 0.55 : 1.0;
-              longAccel = gInfo.torque * lugFactor * (offRoad ? 0.68 : 1.0);
+              longAccel = gInfo.torque * (offRoad ? 0.72 : 1.0);
             }
           } else if (fwdInput < 0) {
             if (vFwd > 1.0) {
-              longAccel = -34.0;
+              longAccel = -36.0;
               isBraking = true;
             } else if (transMode === 'auto') {
               longAccel = -12.0;
@@ -2548,40 +2651,36 @@
           vFwd *= Math.exp(-3.4 * dt);
         }
 
-        // Aero & rolling drag calibrated so 6th gear hits exactly 200 km/h (55.56 m/s)
-        const drag = (offRoad ? 1.45 : 0.085) * vFwd + 0.0024 * vFwd * Math.abs(vFwd);
+        const drag = (offRoad ? 1.40 : 0.08) * vFwd + 0.0036 * vFwd * Math.abs(vFwd);
         vFwd += (longAccel - drag) * dt;
         vFwd = THREE.MathUtils.clamp(vFwd, -15.3, 55.56);
 
-        // Enforce Manual gear speed ceiling smoothly (rev limiter!)
         if (transMode === 'manual' && carState.gear > 0 && vFwd > gInfo.maxSpd) {
           vFwd = THREE.MathUtils.lerp(vFwd, gInfo.maxSpd, 1 - Math.exp(-8 * dt));
         }
 
-        // RPM Calculation for gauge & Car.mp3 pitch
         const lowFloor = carState.gear > 1 ? GEAR_TABLE[carState.gear - 1].maxSpd * 0.52 : 0;
         const rawRpm = carState.gear === 0
           ? Math.abs(vFwd) / gInfo.maxSpd
-          : THREE.MathUtils.clamp((vFwd - lowFloor * 0.4) / Math.max(1, gInfo.maxSpd - lowFloor * 0.4), 0.12, 1.0);
+          : THREE.MathUtils.clamp((vFwd - lowFloor * 0.4) / Math.max(1, gInfo.maxSpd - lowFloor * 0.4), 0.14, 1.0);
         carState.rpm = THREE.MathUtils.lerp(carState.rpm, rawRpm, 1 - Math.exp(-12 * dt));
 
-        // High-speed steering stability up to 200 km/h
-        const speedTurnFactor = THREE.MathUtils.clamp(Math.abs(vFwd) / 5.5, 0, 1);
-        const highSpeedDamp = 1.0 / (1.0 + 0.0014 * vFwd * vFwd);
+        const speedTurnFactor = THREE.MathUtils.clamp(Math.abs(vFwd) / 4.2, 0, 1);
+        const highSpeedDamp = 1.0 / (1.0 + 0.00028 * vFwd * vFwd);
         const dirSign = vFwd >= -0.25 ? 1 : -1;
         const hbTurnBoost = (handbrake && Math.abs(vFwd) > 4.0) ? 1.35 : 1.0;
 
         carState.yawRate = THREE.MathUtils.lerp(
           carState.yawRate,
-          carState.steer * 2.55 * speedTurnFactor * highSpeedDamp * dirSign * hbTurnBoost,
-          1 - Math.exp(-8.5 * dt)
+          carState.steer * 2.95 * speedTurnFactor * highSpeedDamp * dirSign * hbTurnBoost,
+          1 - Math.exp(-13.0 * dt)
         );
         carState.yaw += carState.yawRate * dt;
 
-        const wetSlip = 1.0 - rippleUniforms.uWetness.value * 0.34;
-        let latGrip = (offRoad ? 3.1 : 6.0) * wetSlip;
+        const wetSlip = 1.0 - rippleUniforms.uWetness.value * 0.30;
+        let latGrip = (offRoad ? 3.5 : 7.2) * wetSlip;
         if (handbrake) latGrip *= 0.24;
-        else if (fwdInput > 0 && Math.abs(carState.steer) > 0.28 && Math.abs(vFwd) > 12) latGrip *= 0.74;
+        else if (fwdInput > 0 && Math.abs(carState.steer) > 0.35 && Math.abs(vFwd) > 16) latGrip *= 0.80;
 
         vLat *= Math.exp(-latGrip * dt);
         lateralSlip = Math.abs(vLat);
@@ -2601,13 +2700,13 @@
         carState.pos.x += carState.vx * dt;
         carState.pos.z += carState.vz * dt;
 
-        // Center Jersey Barrier Collision
+        // Tighter Center Jersey Barrier Collision (1.05m)
         const sx = roadSlopeX(carState.pos.z);
         const sideUnit = new THREE.Vector3(1, 0, -sx).normalize();
         const curSide = roadSideOffset(carState.pos.x, carState.pos.z);
-        if (Math.abs(curSide) < 1.35) {
+        if (Math.abs(curSide) < 1.05) {
           const sign = curSide >= 0 ? 1 : -1;
-          const push = (1.35 - Math.abs(curSide)) * sign;
+          const push = (1.05 - Math.abs(curSide)) * sign;
           carState.pos.x += sideUnit.x * push;
           carState.pos.z += sideUnit.z * push;
           const vn = carState.vx * (sideUnit.x * sign) + carState.vz * (sideUnit.z * sign);
@@ -2621,12 +2720,12 @@
           }
         }
 
-        // Outer Steel Guardrail Collision
+        // Tighter Outer Steel Guardrail Collision (7.40m .. 8.65m)
         if (hasGuardrailAtZ(carState.pos.z)) {
           const absS = Math.abs(curSide);
-          if (absS > 7.15 && absS < 8.85) {
+          if (absS > 7.40 && absS < 8.65) {
             const sign = curSide > 0 ? 1 : -1;
-            const targetSide = absS < 8.0 ? 7.15 * sign : 8.85 * sign;
+            const targetSide = absS < 8.0 ? 7.40 * sign : 8.65 * sign;
             const push = targetSide - curSide;
             carState.pos.x += sideUnit.x * push;
             carState.pos.z += sideUnit.z * push;
@@ -2651,12 +2750,12 @@
           carState.vz *= 0.5;
         }
 
-        // 2-Sphere Car Hitboxes vs Forest Tree Trunks
+        // Tighter 2-Sphere Car Hitboxes vs Forest Tree Trunks (0.72m radius)
         for (let pass = 0; pass < 2; pass++) {
-          for (const zOff of [1.42, -1.42]) {
+          for (const zOff of [CAR_HIT_Z, -CAR_HIT_Z]) {
             const hx = carState.pos.x + nFwdX * zOff;
             const hz = carState.pos.z + nFwdZ * zOff;
-            if (resolveChunkTreeCollisions(hx, hz, 1.0, pushVec)) {
+            if (resolveChunkTreeCollisions(hx, hz, CAR_HIT_RADIUS, pushVec)) {
               carState.pos.x += pushVec.x * 0.8;
               carState.pos.z += pushVec.z * 0.8;
               const pLen = Math.hypot(pushVec.x, pushVec.z);
@@ -2688,7 +2787,6 @@
         targetPitch = THREE.MathUtils.clamp(-longAccel * 0.0016 + (handbrake && vFwd > 2 ? 0.03 : 0), -maxPitch, maxPitch);
       }
 
-      // Update Gearbox HUD & Engine Sound (Car.mp3)
       gearLabelEl.textContent = 'GEAR ' + GEAR_TABLE[carState.gear].label;
       rpmBarEl.style.width = Math.round(carState.rpm * 100) + '%';
       updateCarAudio(totalSpeed, carState.rpm, throttleActive);
@@ -2696,7 +2794,8 @@
       carState.distanceMeters += totalSpeed * dt;
       document.getElementById('distStat').textContent = (carState.distanceMeters / 1000).toFixed(2) + ' km';
 
-      // --- Update AI Highway Traffic & Player-Traffic Collisions ---
+      // --- Update AI Highway Traffic, Tighter Collisions & Tire Water Grazing! ---
+      const wetness = rippleUniforms.uWetness.value;
       for (let i = 0; i < trafficCars.length; i++) {
         const ai = trafficCars[i];
         let desiredSpd = ai.targetSpd;
@@ -2720,20 +2819,30 @@
         const rSlope = roadSlopeX(ai.z);
         const sideN = new THREE.Vector3(1, 0, -rSlope).normalize();
         ai.x = roadCenterX(ai.z) + sideN.x * ai.laneSide;
-        const aiZWorld = ai.z + sideN.z * ai.laneSide;
-        ai.y = getDriveSurfaceHeight(ai.x, aiZWorld);
+        ai.zWorld = ai.z + sideN.z * ai.laneSide;
+        ai.y = getDriveSurfaceHeight(ai.x, ai.zWorld);
         ai.yaw = Math.atan2(rSlope, 1) + (ai.dir < 0 ? Math.PI : 0);
 
-        ai.mesh.position.set(ai.x, ai.y, aiZWorld);
+        ai.mesh.position.set(ai.x, ai.y, ai.zWorld);
         ai.mesh.rotation.y = ai.yaw;
 
+        // Emit wet tire water-wake channels for nearby traffic cars!
+        if (wetness > 0.2 && ai.speed > 2.5 && Math.abs(relZ) < 95) {
+          ai.wakeAccum += ai.speed * dt;
+          if (ai.wakeAccum > 1.25) {
+            ai.wakeAccum = 0;
+            emitTireWakePair(ai.x, ai.zWorld, ai.yaw);
+          }
+        }
+
+        // Tighter Player vs AI Car Collision (2.15m)
         const dx = carState.pos.x - ai.x;
-        const dz = carState.pos.z - aiZWorld;
+        const dz = carState.pos.z - ai.zWorld;
         const dist = Math.hypot(dx, dz);
-        if (dist < 2.65 && dist > 1e-4) {
+        if (dist < 2.15 && dist > 1e-4) {
           const nx = dx / dist;
           const nz = dz / dist;
-          const pen = 2.65 - dist;
+          const pen = 2.15 - dist;
           carState.pos.x += nx * pen * 0.7;
           carState.pos.z += nz * pen * 0.7;
           const vn = carState.vx * nx + carState.vz * nz;
@@ -2826,8 +2935,7 @@
       if (ch0 && ch0.lampPositions[0]) hwyLampLights[0].position.copy(ch0.lampPositions[0]);
       if (ch1 && ch1.lampPositions[0]) hwyLampLights[1].position.copy(ch1.lampPositions[0]);
 
-      // Wet Asphalt Tire Wake, Droplets & Mist
-      const wetness = rippleUniforms.uWetness.value;
+      // --- Shared Wet Tire Wake + Water Droplets (Player + Nearby AI Traffic) ---
       const rearRight = new THREE.Vector3(0.86, 0.04, -1.35).applyQuaternion(carGroup.quaternion).add(carState.pos);
       const rearLeft = new THREE.Vector3(-0.86, 0.04, -1.35).applyQuaternion(carGroup.quaternion).add(carState.pos);
 
@@ -2835,17 +2943,7 @@
         wakeTimer += totalSpeed * dt;
         if (wakeTimer > 1.05) {
           wakeTimer = 0;
-          for (const tirePos of [rearLeft, rearRight]) {
-            const idx = wakeCursor;
-            wakeCursor = (wakeCursor + 1) % WAKE_COUNT;
-            wakeAlphas[idx] = 1.0;
-            wakeDummy.position.set(tirePos.x, getDriveSurfaceHeight(tirePos.x, tirePos.z) + 0.015, tirePos.z);
-            wakeDummy.rotation.set(0, carState.yaw, 0);
-            wakeDummy.scale.set(1, 1, 1);
-            wakeDummy.updateMatrix();
-            wakeMesh.setMatrixAt(idx, wakeDummy.matrix);
-          }
-          wakeMesh.instanceMatrix.needsUpdate = true;
+          emitTireWakePair(carState.pos.x, carState.pos.z, carState.yaw);
         }
       }
       for (let i = 0; i < WAKE_COUNT; i++) {
@@ -2853,14 +2951,37 @@
       }
       wakeGeo.attributes.aAlpha.needsUpdate = true;
 
+      // Gather nearby AI cars within 75m to share water droplet splashes
+      const nearbyTraffic = [];
+      for (let i = 0; i < trafficCars.length; i++) {
+        const ai = trafficCars[i];
+        if (Math.abs(ai.zWorld - carState.pos.z) < 75 && ai.speed > 3.0) nearbyTraffic.push(ai);
+      }
+
       const dAttr = dropGeo.attributes.position;
-      const emitDrops = wetness > 0.2 && totalSpeed > 2.5 && !offRoad;
-      dropMat.opacity = emitDrops ? THREE.MathUtils.clamp(totalSpeed / 24, 0.18, 0.45) * sprayScale : 0.0;
+      const emitPlayerDrops = wetness > 0.2 && totalSpeed > 2.5 && !offRoad;
+      const emitAnyDrops = wetness > 0.2 && (emitPlayerDrops || nearbyTraffic.length > 0);
+      dropMat.opacity = emitAnyDrops ? THREE.MathUtils.clamp(Math.max(totalSpeed, 14) / 24, 0.18, 0.44) * sprayScale : 0.0;
+
       for (let i = 0; i < DROP_COUNT; i++) {
         const d = drops[i];
         d.life += dt * 2.8;
         if (d.life >= 1.0) {
-          if (emitDrops) {
+          const useTraffic = (i % 3 !== 0) && nearbyTraffic.length > 0 && wetness > 0.2;
+          if (useTraffic) {
+            const ai = nearbyTraffic[i % nearbyTraffic.length];
+            d.life = Math.random() * 0.25;
+            const sideSign = (i % 2 === 0) ? 1 : -1;
+            const aFwdX = Math.sin(ai.yaw), aFwdZ = Math.cos(ai.yaw);
+            const aLeftX = Math.cos(ai.yaw), aLeftZ = -Math.sin(ai.yaw);
+            d.x = ai.x - aFwdX * 1.32 + aLeftX * 0.86 * sideSign + (Math.random() - 0.5) * 0.2;
+            d.y = ai.y + 0.04;
+            d.z = ai.zWorld - aFwdZ * 1.32 + aLeftZ * 0.86 * sideSign + (Math.random() - 0.5) * 0.2;
+            const aVx = aFwdX * ai.speed, aVz = aFwdZ * ai.speed;
+            d.vx = -aVx * 0.28 + aLeftX * sideSign * (0.35 + Math.random() * 0.9);
+            d.vy = 0.85 + Math.random() * 1.5;
+            d.vz = -aVz * 0.28 + aLeftZ * sideSign * (0.35 + Math.random() * 0.9);
+          } else if (emitPlayerDrops) {
             d.life = Math.random() * 0.25;
             const src = (i % 2 === 0) ? rearLeft : rearRight;
             const sideSign = (i % 2 === 0) ? 1 : -1;
@@ -2946,48 +3067,73 @@
       sunLight.position.copy(carState.pos).addScaledVector(skyUniforms.uLightDir.value, 65);
       sunLight.target.position.copy(carState.pos);
 
-      // Speed-reactive FOV up to 200 km/h!
-      const targetFov = camMode === 2 ? 52 : 54 + THREE.MathUtils.clamp(totalSpeed * 0.25, 0, 14);
+      const targetFov = camMode === 2 ? 52 : 54 + THREE.MathUtils.clamp(totalSpeed * 0.09, 0, 5.0);
       if (Math.abs(camera.fov - targetFov) > 0.05) {
-        camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, 1 - Math.exp(-5 * dt));
+        camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, 1 - Math.exp(-6 * dt));
         camera.updateProjectionMatrix();
       }
 
-      if (camMode === 2) {
-        if (!isDragging) orbitYaw += dt * 0.16;
-        const ang = carState.yaw + orbitYaw;
-        const desired = new THREE.Vector3(
-          carState.pos.x + Math.sin(ang) * Math.cos(orbitPitch) * orbitDist,
-          carState.pos.y + Math.sin(orbitPitch) * orbitDist + 0.6,
-          carState.pos.z + Math.cos(ang) * Math.cos(orbitPitch) * orbitDist
-        );
-        const minG = getDriveSurfaceHeight(desired.x, desired.z) + 0.6;
-        if (desired.y < minG) desired.y = minG;
-        camPos.lerp(desired, 1 - Math.exp(-8 * dt));
-        camera.position.copy(camPos);
-        camLook.set(carState.pos.x, carState.pos.y + 0.75, carState.pos.z);
-        camera.lookAt(camLook);
-      } else {
-        const velAngle = totalSpeed > 3.0 ? Math.atan2(carState.vx, carState.vz) : carState.yaw;
-        const carFwd = new THREE.Vector3(Math.sin(carState.yaw), 0, Math.cos(carState.yaw));
-        const velDir = new THREE.Vector3(Math.sin(velAngle), 0, Math.cos(velAngle));
-        const chaseDir = carFwd.clone().lerp(velDir, totalSpeed > 4 ? 0.38 : 0.0).normalize();
+      // =========================================================================
+      // GTA V NVE CINEMATIC PANNING CAMERA + 360° POINTER-LOCK FREE LOOK
+      // =========================================================================
+      if (camMode === 2 && (now - lastMouseMoveTime > 1800) && document.pointerLockElement !== renderer.domElement && !isDragging) {
+        freeLookYaw += dt * 0.16;
+      }
 
-        const dist = camMode === 1 ? -4.3 : -5.5;
-        const hOff = camMode === 1 ? 1.65 : 2.15;
-        const desired = carState.pos.clone().addScaledVector(chaseDir, dist).add(new THREE.Vector3(0, hOff, 0));
-        const minG = getDriveSurfaceHeight(desired.x, desired.z) + 0.75;
-        if (desired.y < minG) desired.y = minG;
-        camPos.lerp(desired, 1 - Math.exp(-6.2 * dt));
-        camera.position.copy(camPos);
-        camLook.copy(carState.pos).addScaledVector(carFwd, 4.0).add(new THREE.Vector3(0, 0.92, 0));
-        camera.lookAt(camLook);
+      let baseYaw = carState.yaw;
+      if (camMode !== 2 && totalSpeed > 3.5) {
+        const velAngle = Math.atan2(carState.vx, carState.vz);
+        let diff = velAngle - carState.yaw;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        baseYaw += diff * 0.34;
+      }
+
+      // Smooth GTA V NVE lateral corner panning & subtle cinematic road sway
+      const targetPan = camMode === 2
+        ? 0
+        : (-carState.steer * 0.85 - THREE.MathUtils.clamp(carState.yawRate * 0.55, -0.75, 0.75) + Math.sin(tSec * 0.85) * 0.14 * Math.min(totalSpeed / 20, 1));
+      panLateral = THREE.MathUtils.lerp(panLateral, targetPan, 1 - Math.exp(-3.8 * dt));
+
+      const targetBank = camMode === 2 ? 0 : THREE.MathUtils.clamp(-carState.yawRate * 0.022, -0.04, 0.04);
+      camBank = THREE.MathUtils.lerp(camBank, targetBank, 1 - Math.exp(-5.0 * dt));
+
+      const activeYaw = baseYaw + freeLookYaw;
+      const basePitch = camMode === 1 ? 0.18 : (camMode === 2 ? 0.24 : 0.25);
+      const activePitch = THREE.MathUtils.clamp(basePitch + freeLookPitch, 0.04, 0.95);
+      const speedPullback = camMode === 2 ? 0 : Math.min(totalSpeed * 0.0135, 0.75);
+      const baseDist = camMode === 2 ? orbitDist : (camMode === 1 ? 4.35 : 5.35);
+      const activeDist = baseDist + speedPullback;
+
+      const camRightX = Math.cos(activeYaw);
+      const camRightZ = -Math.sin(activeYaw);
+
+      desiredOffset.set(
+        -Math.sin(activeYaw) * Math.cos(activePitch) * activeDist + camRightX * panLateral * 0.75,
+        Math.sin(activePitch) * activeDist + (camMode === 1 ? 0.55 : 0.72),
+        -Math.cos(activeYaw) * Math.cos(activePitch) * activeDist + camRightZ * panLateral * 0.75
+      );
+
+      camOffset.lerp(desiredOffset, 1 - Math.exp(-11.0 * dt));
+      camera.position.copy(carState.pos).add(camOffset);
+
+      const minCamG = getDriveSurfaceHeight(camera.position.x, camera.position.z) + 0.58;
+      if (camera.position.y < minCamG) camera.position.y = minCamG;
+
+      const lookLead = (camMode !== 2 && Math.abs(freeLookYaw) < 0.4) ? 1.9 : 0.0;
+      camLook.set(
+        carState.pos.x + Math.sin(activeYaw) * lookLead - camRightX * panLateral * 0.35,
+        carState.pos.y + (camMode === 1 ? 0.85 : 0.95),
+        carState.pos.z + Math.cos(activeYaw) * lookLead - camRightZ * panLateral * 0.35
+      );
+      camera.lookAt(camLook);
+      if (Math.abs(camBank) > 0.0005 && Math.abs(freeLookYaw) < 0.5) {
+        camera.rotateZ(camBank);
       }
 
       if (frameCount % 6 === 0 || frameCount === 1) {
         const prevPlanar = rippleUniforms.uPlanarActive.value;
         rippleUniforms.uPlanarActive.value = 0.0;
-        highwayMat.envMap = null;
         carGroup.visible = false;
         mistPoints.visible = false;
         dropLines.visible = false;
@@ -2998,7 +3144,6 @@
         carGroup.visible = true;
         mistPoints.visible = true;
         dropLines.visible = wetness > 0.2;
-        highwayMat.envMap = cubeRenderTarget.texture;
         rippleUniforms.uPlanarActive.value = prevPlanar;
       }
 
@@ -3017,6 +3162,7 @@
         contactShadow.visible = false;
         mistPoints.visible = false;
         rainLines.visible = false;
+        dropLines.visible = false;
         skyMesh.position.copy(reflCam.position);
 
         renderer.clippingPlanes = [clipPlane];
@@ -3033,6 +3179,7 @@
         contactShadow.visible = true;
         mistPoints.visible = true;
         rainLines.visible = rainActive;
+        dropLines.visible = wetness > 0.2;
       }
 
       if (useBloom) composer.render();
